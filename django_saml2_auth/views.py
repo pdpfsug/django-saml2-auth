@@ -60,11 +60,14 @@ def get_reverse(objs):
     raise Exception('We got a URL reverse issue: %s. This is a known issue but please still submit a ticket at https://github.com/fangli/django-saml2-auth/issues/new' % str(objs))
 
 
-def _get_saml_client(domain):
+def _get_saml_client(domain, idp_metadata):
+    """
+    Return Saml2Client according to data included in metadata_fname.
+    """
     acs_url = domain + get_reverse([acs, 'acs', 'django_saml2_auth:acs'])
     import tempfile, os
     f = tempfile.NamedTemporaryFile(mode='wb', delete=False)
-    f.write(_urllib.urlopen(settings.SAML2_AUTH['METADATA_AUTO_CONF_URL']).read())
+    f.write(_urllib.urlopen(idp_metadata).read())
     f.close()
     saml_settings = {
         'metadata': {
@@ -121,12 +124,19 @@ def _create_new_user(username, email, firstname, lastname):
 
 @csrf_exempt
 def acs(r):
-    saml_client = _get_saml_client(get_current_domain(r))
+
     resp = r.POST.get('SAMLResponse', None)
     next_url = r.session.get('login_next_url', settings.SAML2_AUTH.get('DEFAULT_NEXT_URL', get_reverse('admin:index')))
 
     if not resp:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
+
+    # Switch attributes mapping basing on IdP
+    # KO: idp_metadata = authn_response.issuer()
+    # HACK WORKAROUND IMPROVEME
+    idp_metadata = resp[resp.find("Issuer>")+7:]
+    idp_metadata = idp_metadata[:idp_metadata.find("</")+2]
+    saml_client = _get_saml_client(get_current_domain(r), idp_metadata)
 
     authn_response = saml_client.parse_authn_request_response(
         resp, entity.BINDING_HTTP_POST)
@@ -137,12 +147,9 @@ def acs(r):
     if user_identity is None:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
-    # Switch attributes mapping basing on IdP
-    issuer_metadata = authn_response.issuer()
-    issuer = IdentityProvider.objects.get(pk=issuer_metadata)
-
     # OLD: attrs_map = settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {})
-    attrs_map = issuer.attributes_map_json
+    idp = IdentityProvider.objects.get(pk=idp_metadata)
+    attrs_map = idp.attributes_map_json
 
     user_email = user_identity[attrs_map.get('email', 'Email')][0]
     user_name = user_identity[attrs_map.get('username', 'UserName')][0]
@@ -200,7 +207,13 @@ def signin(r):
 
     r.session['login_next_url'] = next_url
 
-    saml_client = _get_saml_client(get_current_domain(r))
+    try:
+        idp_metadata = r.GET["idp_metadata"]
+    except KeyError:
+        # TODO: maybe more appropriate exception error needed like 'cicciofranco'
+        return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
+
+    saml_client = _get_saml_client(get_current_domain(r), idp_metadata)
     _, info = saml_client.prepare_for_authenticate()
 
     redirect_url = None
