@@ -34,6 +34,8 @@ if parse_version(get_version()) >= parse_version('1.7'):
 else:
     from django.utils.module_loading import import_by_path as import_string
 
+from .models import IdentityProvider
+
 
 def get_current_domain(r):
     if 'ASSERTION_URL' in settings.SAML2_AUTH:
@@ -135,10 +137,17 @@ def acs(r):
     if user_identity is None:
         return HttpResponseRedirect(get_reverse([denied, 'denied', 'django_saml2_auth:denied']))
 
-    user_email = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('email', 'Email')][0]
-    user_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('username', 'UserName')][0]
-    user_first_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('first_name', 'FirstName')][0]
-    user_last_name = user_identity[settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {}).get('last_name', 'LastName')][0]
+    # Switch attributes mapping basing on IdP
+    issuer_metadata = authn_response.issuer()
+    issuer = IdentityProvider.objects.get(pk=issuer_metadata)
+
+    # OLD: attrs_map = settings.SAML2_AUTH.get('ATTRIBUTES_MAP', {})
+    attrs_map = issuer.attributes_map_json
+
+    user_email = user_identity[attrs_map.get('email', 'Email')][0]
+    user_name = user_identity[attrs_map.get('username', 'UserName')][0]
+    user_first_name = user_identity[attrs_map.get('first_name', 'FirstName')][0]
+    user_last_name = user_identity[attrs_map.get('last_name', 'LastName')][0]
 
     target_user = None
     is_new_user = False
