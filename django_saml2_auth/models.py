@@ -6,6 +6,9 @@ class IdentityProvider(models.Model):
 
     """
 
+    entity_id = models.CharField(primary_key=True)
+    name = models.CharField(max_length=64, unique=True)
+
     url_metadata = models.URLField(primary_key=True)
     cert = models.TextField()
     attributes_map = models.TextField(
@@ -13,3 +16,6 @@ class IdentityProvider(models.Model):
     is_enabled = models.BooleanField(
             default=True,
             help_text="Enable or disable this IdP")
+
+    def __unicode__(self):
+        return u"{name} {entity_id}"
